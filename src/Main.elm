@@ -3,7 +3,7 @@ module Main exposing (..)
 -- component import example
 
 import Browser
-import Date exposing (Date)
+import Date exposing (Date, format)
 import DatePicker exposing (..)
 import Html exposing (..)
 import Html.Attributes exposing (..)
@@ -31,8 +31,15 @@ main =
 -- MODEL
 
 
-type alias Model =
-    { datePicker : DatePicker, date : Maybe Date }
+type alias DatePickerModel =
+    { date : Maybe Date
+    , datePicker : DatePicker
+    }
+
+
+type Model
+    = MyPicking DatePickerModel
+    | MyPicked Date
 
 
 init : () -> ( Model, Cmd Msg )
@@ -41,7 +48,11 @@ init flags =
         ( datePicker, datePickerCmd ) =
             DatePicker.init
     in
-    ( { datePicker = datePicker, date = Just <| Date.fromPosix Time.utc (Time.millisToPosix 0) }
+    ( MyPicking
+        (DatePickerModel
+            (Just <| Date.fromPosix Time.utc (Time.millisToPosix 0))
+            datePicker
+        )
     , Cmd.batch
         [ Task.perform NewTime Time.now
         , Cmd.map SetDatePicker datePickerCmd
@@ -68,27 +79,47 @@ someSettings =
 
 update : Msg -> Model -> Step Model Msg a
 update msg model =
-    case msg of
-        NewTime time ->
-            Step.to { model | date = Just (Date.fromPosix Time.utc time) }
+    case model of
+        MyPicking datePickerModel ->
+            case msg of
+                NewTime time ->
+                    Step.to <| MyPicking { datePickerModel | date = Just (Date.fromPosix Time.utc time) }
 
-        SetDatePicker subMsg ->
-            DatePicker.update someSettings subMsg model.datePicker
-                |> datePickerStepWithin model
+                SetDatePicker subMsg ->
+                    datePickerUpdate subMsg datePickerModel
+                        |> Step.map MyPicking
+                        |> Step.onExit (\date -> Step.to (MyPicked date))
+
+        MyPicked _ ->
+            Step.stay
 
 
-datePickerStepWithin model ( datePicker, dateCmd, dateEvent ) =
+datePickerUpdate : DatePicker.Msg -> DatePickerModel -> Step DatePickerModel Msg Date
+datePickerUpdate subMsg datePickerModel =
     let
-        date =
-            case dateEvent of
-                Picked newDate ->
-                    Just newDate
-
-                _ ->
-                    model.date
+        ( newDatePicker, dpCmd, dpEvent ) =
+            DatePicker.update someSettings subMsg datePickerModel.datePicker
     in
-    Step.fromUpdate ( datePicker, dateCmd )
-        |> Step.within (\newDatePicker -> { model | datePicker = newDatePicker, date = date }) SetDatePicker
+    case dpEvent of
+        Picked newDate ->
+            Step.exit newDate
+
+        _ ->
+            Step.to <| { datePickerModel | datePicker = newDatePicker }
+
+
+datePickerToStep ( a, b, c ) =
+    ( ( a, c ), b )
+        |> Step.fromUpdate
+
+
+dateFromDateEvent defaultDate dateEvent =
+    case dateEvent of
+        Picked newDate ->
+            Just newDate
+
+        _ ->
+            defaultDate
 
 
 
@@ -99,61 +130,66 @@ view : Model -> Browser.Document Msg
 view model =
     { title = "title"
     , body =
-        [ DatePicker.view
-            model.date
-            someSettings
-            model.datePicker
-            |> Html.map SetDatePicker
-        , node "style" [] [ text css ]
+        [ node "style" [] [ text css ]
+        , case model of
+            MyPicking datePickerModel ->
+                DatePicker.view
+                    datePickerModel.date
+                    someSettings
+                    datePickerModel.datePicker
+                    |> Html.map SetDatePicker
+
+            MyPicked date ->
+                text <| format "MMMM ddd, y" date
         ]
     }
 
 
 css =
     """
-.elm-datePicker--container {
+.elm-datepicker--container {
   position: relative; }
 
-.elm-datePicker--input:focus {
+.elm-datepicker--input:focus {
   outline: 0; }
 
-.elm-datePicker--picker {
+.elm-datepicker--picker {
   position: absolute;
   border: 1px solid #CCC;
   z-index: 10;
   background-color: white; }
 
-.elm-datePicker--picker-header,
-.elm-datePicker--weekdays {
+.elm-datepicker--picker-header,
+.elm-datepicker--weekdays {
   background: #F2F2F2; }
 
-.elm-datePicker--picker-header {
+.elm-datepicker--picker-header {
   display: flex;
   align-items: center; }
 
-.elm-datePicker--prev-container,
-.elm-datePicker--next-container {
+.elm-datepicker--prev-container,
+.elm-datepicker--next-container {
   flex: 0 1 auto;
   cursor: pointer; }
 
-.elm-datePicker--month-container {
+.elm-datepicker--month-container {
   flex: 1 1 auto;
   padding: 0.5em;
   display: flex;
   flex-direction: column; }
 
-.elm-datePicker--month,
-.elm-datePicker--year {
+.elm-datepicker--month,
+.elm-datepicker--year {
   flex: 1 1 auto;
   cursor: default;
   text-align: center; }
 
-.elm-datePicker--year {
+.elm-datepicker--year {
   font-size: 0.6em;
   font-weight: 700; }
 
-.elm-datePicker--prev,
-.elm-datePicker--next {
+.elm-datepicker--prev,
+.elm-datepicker--next {
   border: 6px solid transparent;
   background-color: inherit;
   display: block;
@@ -161,56 +197,56 @@ css =
   height: 0;
   padding: 0 0.2em; }
 
-.elm-datePicker--prev {
+.elm-datepicker--prev {
   border-right-color: #AAA; }
-  .elm-datePicker--prev:hover {
+  .elm-datepicker--prev:hover {
     border-right-color: #BBB; }
 
-.elm-datePicker--next {
+.elm-datepicker--next {
   border-left-color: #AAA; }
-  .elm-datePicker--next:hover {
+  .elm-datepicker--next:hover {
     border-left-color: #BBB; }
 
-.elm-datePicker--table {
+.elm-datepicker--table {
   border-spacing: 0;
   border-collapse: collapse;
   font-size: 0.8em; }
-  .elm-datePicker--table td {
+  .elm-datepicker--table td {
     width: 2em;
     height: 2em;
     text-align: center; }
 
-.elm-datePicker--row {
+.elm-datepicker--row {
   border-top: 1px solid #F2F2F2; }
 
-.elm-datePicker--dow {
+.elm-datepicker--dow {
   border-bottom: 1px solid #CCC;
   cursor: default; }
 
-.elm-datePicker--day {
+.elm-datepicker--day {
   cursor: pointer; }
-  .elm-datePicker--day:hover {
+  .elm-datepicker--day:hover {
     background: #F2F2F2; }
 
-.elm-datePicker--disabled {
+.elm-datepicker--disabled {
   cursor: default;
   color: #DDD; }
-  .elm-datePicker--disabled:hover {
+  .elm-datepicker--disabled:hover {
     background: inherit; }
 
-.elm-datePicker--picked {
+.elm-datepicker--picked {
   color: white;
   background: darkblue; }
-  .elm-datePicker--picked:hover {
+  .elm-datepicker--picked:hover {
     background: darkblue; }
 
-.elm-datePicker--today {
+.elm-datepicker--today {
   font-weight: bold; }
 
-.elm-datePicker--other-month {
+.elm-datepicker--other-month {
   color: #AAA; }
-  .elm-datePicker--other-month.elm-datePicker--disabled {
+  .elm-datepicker--other-month.elm-datepicker--disabled {
     color: #EEE; }
-  .elm-datePicker--other-month.elm-datePicker--picked {
+  .elm-datepicker--other-month.elm-datepicker--picked {
     color: white; }
 """
